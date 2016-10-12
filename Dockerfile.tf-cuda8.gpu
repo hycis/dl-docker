@@ -1,4 +1,4 @@
-FROM nvidia/cuda:7.5-cudnn5-devel
+FROM nvidia/cuda:8.0-cudnn5-devel
 
 MAINTAINER Sai Soundararaj <saip@outlook.com>
 
@@ -15,6 +15,17 @@ ARG CAFFE_VERSION=master
 #	echo -e "\n**********************\nCUDA Version\n**********************\n" && \
 #	nvcc -V && \
 #	echo -e "\n\nBuilding your Deep Learning Docker Image...\n"
+
+ENV BAZEL_VERSION 0.3.1
+# setup proxy for user
+ENV http_proxy http://proxy:8080
+ENV https_proxy http://proxy:8080
+ENV ftp_proxy http://proxy:8080
+ENV all_proxy http://proxy:8080
+ENV HTTP_PROXY http://proxy:8080
+ENV HTTPS_PROXY http://proxy:8080
+ENV FTP_PROXY http://proxy:8080
+ENV ALL_PROXY http://proxy:8080
 
 # Install some dependencies
 RUN apt-get update && apt-get install -y \
@@ -76,6 +87,7 @@ RUN apt-get update && apt-get install -y \
 		python-pandas \
 		python-sklearn \
 		python-sympy \
+		swig \
 		&& \
 	apt-get clean && \
 	apt-get autoremove && \
@@ -99,9 +111,61 @@ RUN pip --no-cache-dir install --upgrade ipython && \
 
 
 # Install TensorFlow
-RUN pip --no-cache-dir install \
-	https://storage.googleapis.com/tensorflow/linux/${TENSORFLOW_ARCH}/tensorflow-${TENSORFLOW_VERSION}-cp27-none-linux_x86_64.whl
+# Set up Bazel.
 
+# We need to add a custom PPA to pick up JDK8, since trusty doesn't
+# have an openjdk8 backport.  openjdk-r is maintained by a reliable contributor:
+# Matthias Klose (https://launchpad.net/~doko).  It will do until
+# we either update the base image beyond 14.04 or openjdk-8 is
+# finally backported to trusty; see e.g.
+#   https://bugs.launchpad.net/trusty-backports/+bug/1368094
+RUN add-apt-repository -y ppa:openjdk-r/ppa && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends openjdk-8-jdk openjdk-8-jre-headless && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Running bazel inside a `docker build` command causes trouble, cf:
+#   https://github.com/bazelbuild/bazel/issues/134
+# The easiest solution is to set up a bazelrc file forcing --batch.
+RUN echo "startup --batch" >>/root/.bazelrc
+# Similarly, we need to workaround sandboxing issues:
+#   https://github.com/bazelbuild/bazel/issues/418
+RUN echo "build --spawn_strategy=standalone --genrule_strategy=standalone" \
+    >>/root/.bazelrc
+ENV BAZELRC /root/.bazelrc
+# Install the most recent bazel release.
+
+WORKDIR /
+RUN mkdir /bazel && \
+    cd /bazel && \
+    curl -fSsL -O https://github.com/bazelbuild/bazel/releases/download/$BAZEL_VERSION/bazel-$BAZEL_VERSION-installer-linux-x86_64.sh && \
+    curl -fSsL -o /bazel/LICENSE.txt https://raw.githubusercontent.com/bazelbuild/bazel/master/LICENSE.txt && \
+    chmod +x bazel-*.sh && \
+    ./bazel-$BAZEL_VERSION-installer-linux-x86_64.sh && \
+    cd / && \
+    rm -f /bazel/bazel-$BAZEL_VERSION-installer-linux-x86_64.sh
+
+# Download and build TensorFlow.
+
+RUN git clone --recursive https://github.com/tensorflow/tensorflow.git && \
+    cd tensorflow && \
+    git checkout v$TENSORFLOW_VERSION
+WORKDIR /tensorflow
+
+# TODO(craigcitro): Don't install the pip package, since it makes it
+# more difficult to experiment with local changes. Instead, just add
+# the built directory to the path.
+
+ENV TF_NEED_CUDA=1 \
+    TF_CUDA_VERSION='8.0' \
+    TF_CUDNN_VERSION=5 \
+    TF_CUDA_COMPUTE_CAPABILITIES="5.3,6.0"
+
+RUN ./configure && \
+    bazel build -c opt --config=cuda tensorflow/tools/pip_package:build_pip_package && \
+    bazel-bin/tensorflow/tools/pip_package/build_pip_package /tmp/pip && \
+    pip install --upgrade /tmp/pip/tensorflow-*.whl
 
 # Install dependencies for Caffe
 RUN apt-get update && apt-get install -y \
@@ -139,7 +203,7 @@ RUN echo "$CAFFE_ROOT/build/lib" >> /etc/ld.so.conf.d/caffe.conf && ldconfig
 
 
 # Install Theano and set up Theano config (.theanorc) for CUDA and OpenBLAS
-RUN pip --no-cache-dir install git+git://github.com/Theano/Theano.git@${THEANO_VERSION} && \
+RUN pip --no-cache-dir install git+https://github.com/Theano/Theano.git@${THEANO_VERSION} && \
 	\
 	echo "[global]\ndevice=gpu\nfloatX=float32\noptimizer_including=cudnn\nmode=FAST_RUN \
 		\n[lib]\ncnmem=0.95 \
@@ -150,17 +214,20 @@ RUN pip --no-cache-dir install git+git://github.com/Theano/Theano.git@${THEANO_V
 
 
 # Install Keras
-RUN pip --no-cache-dir install git+git://github.com/fchollet/keras.git@${KERAS_VERSION}
+RUN pip --no-cache-dir install git+https://github.com/fchollet/keras.git@${KERAS_VERSION}
 
 
 # Install Lasagne
-RUN pip --no-cache-dir install git+git://github.com/Lasagne/Lasagne.git@${LASAGNE_VERSION}
+RUN pip --no-cache-dir install git+https://github.com/Lasagne/Lasagne.git@${LASAGNE_VERSION}
 
 
 # Install Torch
-RUN git clone https://github.com/torch/distro.git /root/torch --recursive && \
+RUN rm /root/torch/install-deps || true && \
+    git clone https://github.com/torch/distro.git /root/torch --recursive && \
 	cd /root/torch && \
-	bash install-deps && \
+	perl -pi -e 's/sudo\s/sudo -E /g' install-deps && \
+	chmod +x install-deps && \
+	./install-deps && \
 	yes no | ./install.sh
 
 # Export the LUA evironment variables manually
@@ -172,7 +239,8 @@ ENV LUA_PATH='/root/.luarocks/share/lua/5.1/?.lua;/root/.luarocks/share/lua/5.1/
 ENV LUA_CPATH='/root/torch/install/lib/?.so;'$LUA_CPATH
 
 # Install the latest versions of nn, cutorch, cunn, cuDNN bindings and iTorch
-RUN luarocks install nn && \
+RUN git config --global url.https://github.com/.insteadOf git://github.com/ && \
+    luarocks install nn && \
 	luarocks install cutorch && \
 	luarocks install cunn && \
 	\

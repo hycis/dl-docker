@@ -1,6 +1,6 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-if [ "$1" = "go" ]
+if [ "$1" = "go" -a "$2" != "-h" ]
 then
     nvidia-docker exec -it "$2" bash
 else

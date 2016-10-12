@@ -8,10 +8,9 @@ import argparse
 from datetime import datetime
 from tabulate import tabulate
 
-
+TEST = 0
 DOCKER_BASE_URL = 'unix://var/run/docker.sock'
 STATUS_FILE = '/tmp/dockers/status.pkl'
-# STATUS_FILE = './status.pkl'
 
 
 class DockerBlockEntry(object):
@@ -21,6 +20,9 @@ class DockerBlockEntry(object):
         self.blocked_by = blocked_by
         self.since = since
         self.until = until
+
+    def to_list(self):
+        return [self.name, self.blocked_by, self.since, self.until]
 
 
 def block(args):
@@ -64,14 +66,17 @@ def unblock(args):
 
 
 def ls(_):
-    print(tabulate(load_status(), headers=['Name', 'Blocked by', 'Since', 'Until']))
+    print(tabulate([s.to_list() for s in load_status()],
+                   headers=['Name', 'Blocked by', 'Since', 'Until']))
 
 
 def get_container_names():
-    from docker import Client
-    docker_client = Client(base_url=DOCKER_BASE_URL)
-    return sorted([x['Names'][0][1:] for x in docker_client.containers() if len(x.get('Names')) > 0])
-    # return ['gpu0', 'gpu1', 'gpus']
+    if TEST:
+        return ['gpu0', 'gpu1', 'gpus']
+    else:
+        from docker import Client
+        docker_client = Client(base_url=DOCKER_BASE_URL)
+        return sorted([x['Names'][0][1:] for x in docker_client.containers() if len(x.get('Names')) > 0])
 
 
 def load_status():
@@ -82,6 +87,17 @@ def load_status():
             status = pickle.load(f)
     else:
         status = []
+        d = os.path.split(STATUS_FILE)[0]
+        if not os.path.exists(d):
+            os.makedirs(d, mode=0777)
+
+        umask_original = os.umask(0)
+        try:
+            handle = os.fdopen(os.open(STATUS_FILE, os.O_WRONLY | os.O_CREAT, int("0666", 8)), 'w')
+        finally:
+            os.umask(umask_original)
+        pickle.dump(status, handle)
+        handle.close()
 
     for c in containers:
         if next((s for s in status if s.name == c), None) is None:

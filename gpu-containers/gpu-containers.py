@@ -2,6 +2,8 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import os
+import sys
+import subprocess
 import pwd
 import cPickle as pickle
 import argparse
@@ -15,19 +17,20 @@ STATUS_FILE = '/tmp/dockers/status.pkl'
 
 class DockerBlockEntry(object):
 
-    def __init__(self, name, blocked_by, since, until):
+    def __init__(self, name, blocked_by, user_fullname, since, until):
         self.name = name
         self.blocked_by = blocked_by
+        self.user_fullname = user_fullname
         self.since = since
         self.until = until
 
     def to_list(self):
-        return [self.name, self.blocked_by, self.since, self.until]
+        return [self.name, self.blocked_by, self.user_fullname, self.since, self.until]
 
 
 def block(args):
     status = load_status()
-    username = get_username()
+    username, full_name = get_username()
 
     entry = next((s for s in status if s.name == args.container), None)
     if entry is None:
@@ -36,6 +39,7 @@ def block(args):
     if entry.blocked_by is not None and entry.blocked_by != username:
         raise ValueError('Container {} is already blocked by {}'.format(entry.name, entry.blocked_by))
     entry.blocked_by = username
+    entry.user_fullname = full_name
     if entry.since is None:
         entry.since = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     if args.until is not None and len(args.until) > 0:
@@ -48,7 +52,7 @@ def block(args):
 
 def unblock(args):
     status = load_status()
-    username = get_username()
+    username, full_name = get_username()
 
     entry = next((s for s in status if s.name == args.container), None)
     if entry is None:
@@ -57,6 +61,7 @@ def unblock(args):
     if entry.blocked_by != username:
         raise ValueError('Cannot unblock. Container {} was not blocked by you ({})'.format(entry.name, username))
     entry.blocked_by = None
+    entry.user_fullname = None
     entry.since = None
     entry.until = None
     save_status(status)
@@ -67,7 +72,7 @@ def unblock(args):
 
 def ls(_):
     print(tabulate([s.to_list() for s in load_status()],
-                   headers=['Name', 'Blocked by', 'Since', 'Until']))
+                   headers=['Name', 'Blocked by', 'Full name', 'Since', 'Until']))
 
 
 def get_container_names():
@@ -112,7 +117,23 @@ def save_status(status):
 
 
 def get_username():
-    return pwd.getpwuid(os.getuid()).pw_name
+    username = pwd.getpwuid(os.getuid()).pw_name
+
+    # platform-dependent
+    if sys.platform.startswith('linux'):
+        return username, run_process(['getent', 'passwd', username]).split(':')[4]
+    if sys.platform.startswith('darwin'):
+        return username, run_process(['id', '-F'])
+
+    return username, None
+
+
+def run_process(args):
+    p = subprocess.Popen(args, stdout=subprocess.PIPE)
+    p.wait()
+    if p.returncode == 0:
+        return p.stdout.readline().strip()
+    return None
 
 
 def main():

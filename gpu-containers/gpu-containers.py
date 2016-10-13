@@ -106,7 +106,7 @@ def load_status():
 
     for c in containers:
         if next((s for s in status if s.name == c), None) is None:
-            status.append(DockerBlockEntry(c, None, None, None))
+            status.append(DockerBlockEntry(c, None, None, None, None))
 
     return [s for s in status if s.name in containers]
 

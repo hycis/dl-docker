@@ -20,12 +20,12 @@ class DockerBlockEntry(object):
     def __init__(self, name, blocked_by, user_fullname, since, until):
         self.name = name
         self.blocked_by = blocked_by
-        self.user_fullname = user_fullname
+        self.user_fullname = user_fullname.strip(', ')
         self.since = since
         self.until = until
 
     def to_list(self):
-        return [self.name, self.blocked_by, self.user_fullname, self.since, self.until]
+        return [self.name, self.blocked_by, self.user_fullname.strip(', '), self.since, self.until]
 
 
 def block(args):
@@ -132,7 +132,7 @@ def run_process(args):
     p = subprocess.Popen(args, stdout=subprocess.PIPE)
     p.wait()
     if p.returncode == 0:
-        return p.stdout.readline().strip()
+        return p.stdout.readline().strip(', ')
     return None
 
 

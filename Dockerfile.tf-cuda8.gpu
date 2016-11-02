@@ -27,8 +27,8 @@ ENV HTTP_PROXY $PROXY_SERVER
 ENV HTTPS_PROXY $PROXY_SERVER
 ENV FTP_PROXY $PROXY_SERVER
 ENV ALL_PROXY $PROXY_SERVER
-ENV no_proxy *.local,169.254/16,*.sap.corp,*.corp.sap,.sap.corp,.corp.sap
-ENV NO_PROXY *.local,169.254/16,*.sap.corp,*.corp.sap,.sap.corp,.corp.sap
+ENV no_proxy *.local,169.254/16
+ENV NO_PROXY *.local,169.254/16
 
 # Install some dependencies
 RUN apt-get update && apt-get install -y \

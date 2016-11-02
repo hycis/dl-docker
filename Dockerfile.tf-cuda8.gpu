@@ -18,7 +18,7 @@ ARG CAFFE_VERSION=master
 
 ENV BAZEL_VERSION 0.3.1
 # setup proxy for user
-ENV PROXY_SERVER http://proxy.wdf.sap.corp:8080
+ENV PROXY_SERVER http://proxy:8080
 ENV http_proxy $PROXY_SERVER
 ENV https_proxy $PROXY_SERVER
 ENV ftp_proxy $PROXY_SERVER

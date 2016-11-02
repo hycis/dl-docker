@@ -24,10 +24,17 @@ class DockerBlockEntry(object):
         self.since = since
         self.until = until
 
+    @property
+    def pretty_username(self):
+        if self.user_fullname is None:
+            return None
+        s = self.user_fullname.strip(', ').split(',')
+        if len(s) > 1:
+            return '{} ({})'.format(s[0], s[-1])
+        return s[0]
+
     def to_list(self):
-        return [self.name, self.blocked_by,
-                None if self.user_fullname is None else self.user_fullname.strip(', '),
-                self.since, self.until]
+        return [self.name, self.blocked_by, self.pretty_username, self.since, self.until]
 
 
 def block(args):
